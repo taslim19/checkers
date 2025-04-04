@@ -18,31 +18,57 @@ class CheckersGame {
         this.isMultiplayer = false;
         this.gameId = null;
         this.playerColor = null;
-        this.lastUpdateTime = 0;
-        this.lastSavedState = null;
         
         // Initialize Telegram MainButton
         tg.MainButton.text = "Share Game State";
         tg.MainButton.hide();
         
-        // Check for game ID in Telegram start params
-        const startParam = tg.initDataUnsafe?.start_param || '';
-        if (startParam.startsWith('game_')) {
-            const gameId = startParam.replace('game_', '');
-            debug(`Joining game with ID from start_param: ${gameId}`);
-            this.joinGame(gameId);
+        // Check for game ID in start params
+        if (tg.initDataUnsafe?.start_param) {
+            const startParam = tg.initDataUnsafe.start_param;
+            debug(`Received start parameter: ${startParam}`);
+            
+            if (startParam.startsWith('game_')) {
+                const gameId = startParam.replace('game_', '');
+                debug(`Joining game with ID: ${gameId}`);
+                this.joinGame(gameId);
+            } else {
+                debug('No valid game ID found, showing game mode selection');
+                this.setupEventListeners();
+                this.showGameModeSelection();
+            }
         } else {
+            debug('No start parameters, showing game mode selection');
             this.setupEventListeners();
             this.showGameModeSelection();
         }
 
-        // Set up event handlers for Telegram events
+        // Set up event handlers
         tg.onEvent('mainButtonClicked', () => {
-            this.shareGameState();
+            if (this.isMultiplayer && this.currentPlayer === this.playerColor) {
+                this.shareGameState();
+            }
         });
 
         tg.onEvent('viewportChanged', () => {
             this.renderBoard();
+        });
+
+        // Handle back button
+        tg.BackButton.onClick(() => {
+            this.showGameModeSelection();
+        });
+
+        // Handle game data received
+        tg.onEvent('gameScoreReceived', (data) => {
+            try {
+                const gameData = JSON.parse(data);
+                if (gameData.type === 'move' && gameData.gameId === this.gameId) {
+                    this.updateGameState(gameData);
+                }
+            } catch (error) {
+                console.error('Error processing game data:', error);
+            }
         });
     }
 
@@ -113,26 +139,29 @@ class CheckersGame {
         this.gameId = Math.random().toString(36).substring(2, 15);
         this.playerColor = 'white'; // First player is always white
         
-        // Create a proper Telegram Mini App link
-        // Format: tg://resolve?domain=webxdragtestbot&appname=checkers&startapp=gameId
-        const gameLink = `tg://resolve?domain=webxdragtestbot&appname=checkers&startapp=${this.gameId}`;
-        const webLink = `https://t.me/webxdragtestbot/checkers?startapp=${this.gameId}`;
+        // Create a proper Mini App link
+        const webAppUrl = window.location.origin + window.location.pathname;
+        const gameLink = `https://t.me/webxdragtestbot/game?startapp=${this.gameId}`;
         
-        document.getElementById('share-link').value = webLink;
+        document.getElementById('share-link').value = gameLink;
         document.getElementById('game-link').classList.remove('hidden');
         
-        // Show MainButton for sharing game state
+        // Show share button
         tg.MainButton.setText("Share Game");
         tg.MainButton.show();
         tg.MainButton.onClick(() => {
-            // Use Telegram's native sharing
-            tg.openTelegramLink(gameLink);
+            // Share using Telegram's native sharing
+            tg.shareGame({
+                text: `Join my game of Checkers! Click here to play: ${gameLink}`,
+                url: gameLink
+            });
         });
 
         // Also enable the copy link button
         document.getElementById('copy-link').addEventListener('click', () => {
-            navigator.clipboard.writeText(webLink);
-            tg.showAlert('Game link copied! Share it with your friend.');
+            navigator.clipboard.writeText(gameLink).then(() => {
+                tg.showAlert('Game link copied! Share it with your friend.');
+            });
         });
     }
 
@@ -147,11 +176,15 @@ class CheckersGame {
             timestamp: Date.now()
         };
 
-        // Use Telegram's native sharing
-        tg.switchInlineQuery(
-            JSON.stringify(gameState),
-            ['users', 'groups', 'channels']
-        );
+        // Share the current game state
+        tg.MainButton.setText("Share Move");
+        tg.MainButton.show();
+        
+        const moveText = `Checkers game move (Game ID: ${this.gameId})`;
+        tg.sendData(JSON.stringify({
+            type: 'move',
+            ...gameState
+        }));
     }
 
     startNewGame() {
@@ -435,6 +468,38 @@ class CheckersGame {
         }
 
         return whitePieces === 0 || blackPieces === 0;
+    }
+
+    updateGameState(gameData) {
+        if (!gameData || !gameData.board) {
+            debug('Invalid game data received');
+            return;
+        }
+
+        debug(`Updating game state: currentPlayer=${gameData.currentPlayer}`);
+        
+        // Update game state
+        this.board = gameData.board;
+        this.currentPlayer = gameData.currentPlayer;
+        this.gameOver = gameData.gameOver;
+        
+        // Update UI
+        this.renderBoard();
+        
+        if (this.gameOver) {
+            const winner = this.currentPlayer === 'white' ? 'Black' : 'White';
+            document.getElementById('game-status').textContent = `Game Over! ${winner} wins!`;
+            tg.MainButton.hide();
+        } else {
+            // Update status messages
+            if (this.currentPlayer === this.playerColor) {
+                document.getElementById('game-status').textContent = "Your turn!";
+                tg.MainButton.hide();
+            } else {
+                document.getElementById('game-status').textContent = "Waiting for opponent...";
+                tg.MainButton.hide();
+            }
+        }
     }
 }
 
