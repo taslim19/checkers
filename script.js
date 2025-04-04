@@ -25,12 +25,11 @@ class CheckersGame {
         tg.MainButton.text = "Share Game State";
         tg.MainButton.hide();
         
-        // Check if there's a game ID in the URL
-        const urlParams = new URLSearchParams(window.location.search);
-        const gameId = urlParams.get('game');
-        
-        if (gameId) {
-            debug(`Joining game with ID: ${gameId}`);
+        // Check for game ID in Telegram start params
+        const startParam = tg.initDataUnsafe?.start_param || '';
+        if (startParam.startsWith('game_')) {
+            const gameId = startParam.replace('game_', '');
+            debug(`Joining game with ID from start_param: ${gameId}`);
             this.joinGame(gameId);
         } else {
             this.setupEventListeners();
@@ -112,16 +111,34 @@ class CheckersGame {
         this.gameId = Math.random().toString(36).substring(2, 15);
         this.playerColor = 'white'; // First player is always white
         
-        const gameLink = `https://t.me/${tg.initDataUnsafe.user.username}/checkers?startapp=${this.gameId}`;
+        // Create a proper Telegram Mini App link
+        const botName = tg.initDataUnsafe.start_param || 'CheckersGameBot'; // fallback bot name
+        const gameLink = `https://t.me/${botName}?start=game_${this.gameId}`;
+        
         document.getElementById('share-link').value = gameLink;
         document.getElementById('game-link').classList.remove('hidden');
         
         // Show MainButton for sharing game state
         tg.MainButton.setText("Share Game State");
         tg.MainButton.show();
+
+        // Also create a share button using Telegram's native sharing
+        tg.BackButton.hide();
+        tg.MainButton.setText('Share Game');
+        tg.MainButton.show();
+        tg.MainButton.onClick(() => {
+            tg.shareGameScore();
+            tg.sendData(JSON.stringify({
+                type: 'share_game',
+                gameId: this.gameId,
+                link: gameLink
+            }));
+        });
     }
 
     shareGameState() {
+        if (!this.isMultiplayer || !this.gameId) return;
+
         const gameState = {
             gameId: this.gameId,
             board: this.board,
@@ -130,9 +147,11 @@ class CheckersGame {
             timestamp: Date.now()
         };
 
-        // Share game state through Telegram
-        tg.sendData(JSON.stringify(gameState));
-        debug('Game state shared through Telegram');
+        // Use Telegram's native sharing
+        tg.switchInlineQuery(
+            JSON.stringify(gameState),
+            ['users', 'groups', 'channels']
+        );
     }
 
     startNewGame() {
@@ -383,11 +402,13 @@ class CheckersGame {
             const winner = this.currentPlayer === 'white' ? 'Black' : 'White';
             document.getElementById('game-status').textContent = `Game Over! ${winner} wins!`;
             debug(`Game Over - ${winner} wins`);
+            tg.MainButton.hide();
         } else {
             // Update status messages
             if (this.isMultiplayer) {
                 if (this.currentPlayer !== this.playerColor) {
-                    document.getElementById('game-status').textContent = "Share your move with opponent!";
+                    document.getElementById('game-status').textContent = "Share your move!";
+                    tg.MainButton.setText("Share Move");
                     tg.MainButton.show();
                 } else {
                     document.getElementById('game-status').textContent = "Your turn!";
@@ -397,12 +418,6 @@ class CheckersGame {
         }
 
         this.renderBoard();
-
-        // Save state immediately after move in multiplayer
-        if (this.isMultiplayer) {
-            debug('Saving state after multiplayer move');
-            this.saveGameState();
-        }
     }
 
     isGameOver() {
