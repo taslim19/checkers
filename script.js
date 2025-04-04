@@ -21,6 +21,10 @@ class CheckersGame {
         this.lastUpdateTime = 0;
         this.lastSavedState = null;
         
+        // Initialize Telegram MainButton
+        tg.MainButton.text = "Share Game State";
+        tg.MainButton.hide();
+        
         // Check if there's a game ID in the URL
         const urlParams = new URLSearchParams(window.location.search);
         const gameId = urlParams.get('game');
@@ -32,6 +36,15 @@ class CheckersGame {
             this.setupEventListeners();
             this.showGameModeSelection();
         }
+
+        // Set up event handlers for Telegram events
+        tg.onEvent('mainButtonClicked', () => {
+            this.shareGameState();
+        });
+
+        tg.onEvent('viewportChanged', () => {
+            this.renderBoard();
+        });
     }
 
     showGameModeSelection() {
@@ -39,6 +52,7 @@ class CheckersGame {
         document.getElementById('board').classList.add('hidden');
         document.getElementById('restart-btn').classList.add('hidden');
         document.getElementById('game-link').classList.add('hidden');
+        tg.MainButton.hide();
     }
 
     setupEventListeners() {
@@ -85,84 +99,40 @@ class CheckersGame {
         this.setupEventListeners();
         this.startNewGame();
         
-        // Send join game event through Telegram WebApp
-        tg.CloudStorage.setItem(`game_${gameId}_joined`, 'true')
-            .then(() => {
-                this.initializeMultiplayerGame();
-            })
-            .catch(error => {
-                tg.showAlert('Failed to join game. Please try again.');
-            });
-    }
-
-    initializeMultiplayerGame() {
         document.getElementById('game-mode').classList.add('hidden');
         document.getElementById('board').classList.remove('hidden');
         document.getElementById('restart-btn').classList.remove('hidden');
         
-        // Set up CloudStorage listener for game state updates
-        this.setupCloudStorageListener();
+        // Show MainButton for receiving game state
+        tg.MainButton.setText("Request Game State");
+        tg.MainButton.show();
     }
 
-    setupCloudStorageListener() {
-        debug('Setting up cloud storage listener');
-        // Poll for updates every 500ms
-        setInterval(() => {
-            if (this.gameId) {
-                this.fetchGameState();
-            }
-        }, 500);
+    generateGameLink() {
+        this.gameId = Math.random().toString(36).substring(2, 15);
+        this.playerColor = 'white'; // First player is always white
+        
+        const gameLink = `https://t.me/${tg.initDataUnsafe.user.username}/checkers?startapp=${this.gameId}`;
+        document.getElementById('share-link').value = gameLink;
+        document.getElementById('game-link').classList.remove('hidden');
+        
+        // Show MainButton for sharing game state
+        tg.MainButton.setText("Share Game State");
+        tg.MainButton.show();
     }
 
-    async fetchGameState() {
-        try {
-            const state = await tg.CloudStorage.getItem(`game_${this.gameId}_state`);
-            if (state) {
-                const gameState = JSON.parse(state);
-                debug(`Received game state: currentPlayer=${gameState.currentPlayer}, timestamp=${gameState.timestamp}`);
-                
-                // Only update if the state is newer and different from our last saved state
-                if (gameState.timestamp > this.lastUpdateTime && 
-                    JSON.stringify(gameState) !== JSON.stringify(this.lastSavedState)) {
-                    debug('Updating game state - newer state received');
-                    this.updateGameState(gameState);
-                    this.lastUpdateTime = gameState.timestamp;
-                    this.lastSavedState = gameState;
-                }
-            }
-        } catch (error) {
-            console.error('Error fetching game state:', error);
-        }
-    }
+    shareGameState() {
+        const gameState = {
+            gameId: this.gameId,
+            board: this.board,
+            currentPlayer: this.currentPlayer,
+            gameOver: this.gameOver,
+            timestamp: Date.now()
+        };
 
-    updateGameState(gameState) {
-        if (!gameState || !gameState.board) {
-            debug('Invalid game state received');
-            return;
-        }
-        
-        debug(`Updating state: currentPlayer=${gameState.currentPlayer}, myColor=${this.playerColor}`);
-        
-        // Always update the board state
-        this.board = gameState.board;
-        this.currentPlayer = gameState.currentPlayer;
-        this.gameOver = gameState.gameOver;
-        
-        this.renderBoard();
-        
-        if (this.gameOver) {
-            const winner = this.currentPlayer === 'white' ? 'Black' : 'White';
-            document.getElementById('game-status').textContent = `Game Over! ${winner} wins!`;
-        } else {
-            // Update game status
-            if (this.currentPlayer === this.playerColor) {
-                document.getElementById('game-status').textContent = "Your turn!";
-                debug('Updated status: Your turn');
-            } else {
-                document.getElementById('game-status').textContent = "Opponent's turn...";
-                debug('Updated status: Opponent turn');
-            }
-        }
+        // Share game state through Telegram
+        tg.sendData(JSON.stringify(gameState));
+        debug('Game state shared through Telegram');
     }
 
     startNewGame() {
@@ -184,18 +154,6 @@ class CheckersGame {
         } else if (this.isBotGame && this.currentPlayer === 'white') {
             this.makeBotMove();
         }
-    }
-
-    generateGameLink() {
-        this.gameId = Math.random().toString(36).substring(2, 15);
-        this.playerColor = 'white'; // First player is always white
-        
-        const gameLink = `${window.location.origin}${window.location.pathname}?game=${this.gameId}`;
-        document.getElementById('share-link').value = gameLink;
-        document.getElementById('game-link').classList.remove('hidden');
-        
-        // Initialize game state in CloudStorage
-        this.saveGameState();
     }
 
     async saveGameState() {
@@ -429,9 +387,11 @@ class CheckersGame {
             // Update status messages
             if (this.isMultiplayer) {
                 if (this.currentPlayer !== this.playerColor) {
-                    document.getElementById('game-status').textContent = "Opponent's turn...";
+                    document.getElementById('game-status').textContent = "Share your move with opponent!";
+                    tg.MainButton.show();
                 } else {
                     document.getElementById('game-status').textContent = "Your turn!";
+                    tg.MainButton.hide();
                 }
             }
         }
