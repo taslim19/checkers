@@ -12,8 +12,18 @@ class CheckersGame {
         this.isBotGame = false;
         this.isMultiplayer = false;
         this.gameId = null;
-        this.setupEventListeners();
-        this.showGameModeSelection();
+        this.playerColor = null;
+        
+        // Check if there's a game ID in the URL
+        const urlParams = new URLSearchParams(window.location.search);
+        const gameId = urlParams.get('game');
+        
+        if (gameId) {
+            this.joinGame(gameId);
+        } else {
+            this.setupEventListeners();
+            this.showGameModeSelection();
+        }
     }
 
     showGameModeSelection() {
@@ -45,7 +55,7 @@ class CheckersGame {
             const linkInput = document.getElementById('share-link');
             linkInput.select();
             document.execCommand('copy');
-            alert('Link copied to clipboard!');
+            tg.showAlert('Link copied to clipboard!');
         });
 
         const board = document.getElementById('board');
@@ -58,6 +68,62 @@ class CheckersGame {
 
             this.handleSquareClick(row, col);
         });
+    }
+
+    joinGame(gameId) {
+        this.gameId = gameId;
+        this.isMultiplayer = true;
+        this.playerColor = 'black'; // Second player is always black
+        this.setupEventListeners();
+        this.startNewGame();
+        
+        // Send join game event through Telegram WebApp
+        tg.CloudStorage.setItem(`game_${gameId}_joined`, 'true')
+            .then(() => {
+                this.initializeMultiplayerGame();
+            })
+            .catch(error => {
+                tg.showAlert('Failed to join game. Please try again.');
+            });
+    }
+
+    initializeMultiplayerGame() {
+        document.getElementById('game-mode').classList.add('hidden');
+        document.getElementById('board').classList.remove('hidden');
+        document.getElementById('restart-btn').classList.remove('hidden');
+        
+        // Set up CloudStorage listener for game state updates
+        this.setupCloudStorageListener();
+    }
+
+    setupCloudStorageListener() {
+        // Poll for updates every second
+        setInterval(() => {
+            if (this.gameId) {
+                tg.CloudStorage.getItem(`game_${this.gameId}_state`)
+                    .then(state => {
+                        if (state) {
+                            const gameState = JSON.parse(state);
+                            this.updateGameState(gameState);
+                        }
+                    });
+            }
+        }, 1000);
+    }
+
+    updateGameState(gameState) {
+        if (!gameState) return;
+        
+        this.board = gameState.board;
+        this.currentPlayer = gameState.currentPlayer;
+        this.gameOver = gameState.gameOver;
+        
+        this.renderBoard();
+        
+        if (this.gameOver) {
+            const winner = this.currentPlayer === 'white' ? 'Black' : 'White';
+            document.getElementById('game-status').textContent = `Game Over! ${winner} wins!`;
+        }
     }
 
     startNewGame() {
@@ -73,16 +139,39 @@ class CheckersGame {
         this.initializeBoard();
         this.renderBoard();
 
-        if (this.isBotGame && this.currentPlayer === 'white') {
+        if (this.isMultiplayer) {
+            // Save initial game state
+            this.saveGameState();
+        } else if (this.isBotGame && this.currentPlayer === 'white') {
             this.makeBotMove();
         }
     }
 
     generateGameLink() {
         this.gameId = Math.random().toString(36).substring(2, 15);
+        this.playerColor = 'white'; // First player is always white
+        
         const gameLink = `${window.location.origin}${window.location.pathname}?game=${this.gameId}`;
         document.getElementById('share-link').value = gameLink;
         document.getElementById('game-link').classList.remove('hidden');
+        
+        // Initialize game state in CloudStorage
+        this.saveGameState();
+    }
+
+    saveGameState() {
+        if (!this.gameId) return;
+
+        const gameState = {
+            board: this.board,
+            currentPlayer: this.currentPlayer,
+            gameOver: this.gameOver
+        };
+
+        tg.CloudStorage.setItem(`game_${this.gameId}_state`, JSON.stringify(gameState))
+            .catch(error => {
+                tg.showAlert('Failed to save game state. Please try again.');
+            });
     }
 
     initializeBoard() {
@@ -139,6 +228,7 @@ class CheckersGame {
     handleSquareClick(row, col) {
         if (this.gameOver) return;
         if (this.isBotGame && this.currentPlayer === 'white') return;
+        if (this.isMultiplayer && this.currentPlayer !== this.playerColor) return;
 
         const piece = this.board[row][col];
 
@@ -147,6 +237,8 @@ class CheckersGame {
             this.movePiece(this.selectedPiece.row, this.selectedPiece.col, row, col);
             if (this.isBotGame && !this.gameOver) {
                 setTimeout(() => this.makeBotMove(), 500);
+            } else if (this.isMultiplayer) {
+                this.saveGameState();
             }
             return;
         }
