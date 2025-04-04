@@ -13,6 +13,7 @@ class CheckersGame {
         this.isMultiplayer = false;
         this.gameId = null;
         this.playerColor = null;
+        this.lastUpdateTime = 0;
         
         // Check if there's a game ID in the URL
         const urlParams = new URLSearchParams(window.location.search);
@@ -97,32 +98,49 @@ class CheckersGame {
     }
 
     setupCloudStorageListener() {
-        // Poll for updates every second
+        // Poll for updates every 500ms
         setInterval(() => {
             if (this.gameId) {
                 tg.CloudStorage.getItem(`game_${this.gameId}_state`)
                     .then(state => {
                         if (state) {
                             const gameState = JSON.parse(state);
-                            this.updateGameState(gameState);
+                            // Only update if the state is newer
+                            if (gameState.timestamp > this.lastUpdateTime) {
+                                this.updateGameState(gameState);
+                                this.lastUpdateTime = gameState.timestamp;
+                            }
                         }
+                    })
+                    .catch(error => {
+                        console.error('Error fetching game state:', error);
                     });
             }
-        }, 1000);
+        }, 500);
     }
 
     updateGameState(gameState) {
-        if (!gameState) return;
+        if (!gameState || !gameState.board) return;
         
-        this.board = gameState.board;
-        this.currentPlayer = gameState.currentPlayer;
-        this.gameOver = gameState.gameOver;
-        
-        this.renderBoard();
-        
-        if (this.gameOver) {
-            const winner = this.currentPlayer === 'white' ? 'Black' : 'White';
-            document.getElementById('game-status').textContent = `Game Over! ${winner} wins!`;
+        // Only update if it's not our turn or if we're joining
+        if (this.currentPlayer !== this.playerColor || !this.board.length) {
+            this.board = gameState.board;
+            this.currentPlayer = gameState.currentPlayer;
+            this.gameOver = gameState.gameOver;
+            
+            this.renderBoard();
+            
+            if (this.gameOver) {
+                const winner = this.currentPlayer === 'white' ? 'Black' : 'White';
+                document.getElementById('game-status').textContent = `Game Over! ${winner} wins!`;
+            }
+
+            // Update game status for waiting player
+            if (this.currentPlayer !== this.playerColor && !this.gameOver) {
+                document.getElementById('game-status').textContent = "Opponent's turn...";
+            } else if (this.currentPlayer === this.playerColor && !this.gameOver) {
+                document.getElementById('game-status').textContent = "Your turn!";
+            }
         }
     }
 
@@ -165,12 +183,17 @@ class CheckersGame {
         const gameState = {
             board: this.board,
             currentPlayer: this.currentPlayer,
-            gameOver: this.gameOver
+            gameOver: this.gameOver,
+            timestamp: Date.now()
         };
 
         tg.CloudStorage.setItem(`game_${this.gameId}_state`, JSON.stringify(gameState))
+            .then(() => {
+                this.lastUpdateTime = gameState.timestamp;
+            })
             .catch(error => {
                 tg.showAlert('Failed to save game state. Please try again.');
+                console.error('Error saving game state:', error);
             });
     }
 
@@ -371,9 +394,23 @@ class CheckersGame {
             this.gameOver = true;
             const winner = this.currentPlayer === 'white' ? 'Black' : 'White';
             document.getElementById('game-status').textContent = `Game Over! ${winner} wins!`;
+        } else {
+            // Update status messages
+            if (this.isMultiplayer) {
+                if (this.currentPlayer !== this.playerColor) {
+                    document.getElementById('game-status').textContent = "Opponent's turn...";
+                } else {
+                    document.getElementById('game-status').textContent = "Your turn!";
+                }
+            }
         }
 
         this.renderBoard();
+
+        // Save state immediately after move in multiplayer
+        if (this.isMultiplayer) {
+            this.saveGameState();
+        }
     }
 
     isGameOver() {
