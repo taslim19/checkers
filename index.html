@@ -11,12 +11,23 @@
     <div class="container">
         <h1>Checkers</h1>
         <div class="game-info">
-            <div id="current-player">Current Player: Red</div>
+            <div id="current-player">Current Player: White (Bot)</div>
             <div id="game-status"></div>
+            <div id="game-link" class="hidden">
+                <p>Share this link to play with a friend:</p>
+                <div class="link-container">
+                    <input type="text" id="share-link" readonly>
+                    <button id="copy-link">Copy</button>
+                </div>
+            </div>
         </div>
-        <div id="board" class="board"></div>
+        <div id="game-mode" class="game-mode">
+            <button id="play-bot">Play vs Bot</button>
+            <button id="play-friend">Play with Friend</button>
+        </div>
+        <div id="board" class="board hidden"></div>
         <div class="controls">
-            <button id="restart-btn">Restart Game</button>
+            <button id="restart-btn" class="hidden">Restart Game</button>
         </div>
     </div>
     <script src="script.js"></script>
