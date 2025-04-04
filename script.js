@@ -5,13 +5,84 @@ tg.expand();
 class CheckersGame {
     constructor() {
         this.board = [];
-        this.currentPlayer = 'red';
+        this.currentPlayer = 'white';
+        this.selectedPiece = null;
+        this.validMoves = [];
+        this.gameOver = false;
+        this.isBotGame = false;
+        this.isMultiplayer = false;
+        this.gameId = null;
+        this.setupEventListeners();
+        this.showGameModeSelection();
+    }
+
+    showGameModeSelection() {
+        document.getElementById('game-mode').classList.remove('hidden');
+        document.getElementById('board').classList.add('hidden');
+        document.getElementById('restart-btn').classList.add('hidden');
+        document.getElementById('game-link').classList.add('hidden');
+    }
+
+    setupEventListeners() {
+        document.getElementById('play-bot').addEventListener('click', () => {
+            this.isBotGame = true;
+            this.isMultiplayer = false;
+            this.startNewGame();
+        });
+
+        document.getElementById('play-friend').addEventListener('click', () => {
+            this.isBotGame = false;
+            this.isMultiplayer = true;
+            this.startNewGame();
+            this.generateGameLink();
+        });
+
+        document.getElementById('restart-btn').addEventListener('click', () => {
+            this.startNewGame();
+        });
+
+        document.getElementById('copy-link').addEventListener('click', () => {
+            const linkInput = document.getElementById('share-link');
+            linkInput.select();
+            document.execCommand('copy');
+            alert('Link copied to clipboard!');
+        });
+
+        const board = document.getElementById('board');
+        board.addEventListener('click', (e) => {
+            const square = e.target.closest('.square');
+            if (!square) return;
+
+            const row = parseInt(square.dataset.row);
+            const col = parseInt(square.dataset.col);
+
+            this.handleSquareClick(row, col);
+        });
+    }
+
+    startNewGame() {
+        document.getElementById('game-mode').classList.add('hidden');
+        document.getElementById('board').classList.remove('hidden');
+        document.getElementById('restart-btn').classList.remove('hidden');
+        
+        this.board = [];
+        this.currentPlayer = 'white';
         this.selectedPiece = null;
         this.validMoves = [];
         this.gameOver = false;
         this.initializeBoard();
         this.renderBoard();
-        this.setupEventListeners();
+
+        if (this.isBotGame && this.currentPlayer === 'white') {
+            this.makeBotMove();
+        }
+    }
+
+    generateGameLink() {
+        this.gameId = Math.random().toString(36).substring(2, 15);
+        const gameLink = `${window.location.origin}${window.location.pathname}?game=${this.gameId}`;
+        document.getElementById('share-link').value = gameLink;
+        document.getElementById('game-link').classList.remove('hidden');
     }
 
     initializeBoard() {
@@ -20,11 +91,11 @@ class CheckersGame {
             this.board[i] = new Array(8).fill(null);
         }
 
-        // Place red pieces (top)
+        // Place white pieces (top)
         for (let row = 0; row < 3; row++) {
             for (let col = 0; col < 8; col++) {
                 if ((row + col) % 2 === 1) {
-                    this.board[row][col] = { color: 'red', isKing: false };
+                    this.board[row][col] = { color: 'white', isKing: false };
                 }
             }
         }
@@ -61,39 +132,22 @@ class CheckersGame {
             }
         }
 
-        document.getElementById('current-player').textContent = `Current Player: ${this.currentPlayer}`;
-    }
-
-    setupEventListeners() {
-        const board = document.getElementById('board');
-        board.addEventListener('click', (e) => {
-            const square = e.target.closest('.square');
-            if (!square) return;
-
-            const row = parseInt(square.dataset.row);
-            const col = parseInt(square.dataset.col);
-
-            this.handleSquareClick(row, col);
-        });
-
-        document.getElementById('restart-btn').addEventListener('click', () => {
-            this.initializeBoard();
-            this.currentPlayer = 'red';
-            this.selectedPiece = null;
-            this.validMoves = [];
-            this.gameOver = false;
-            this.renderBoard();
-        });
+        document.getElementById('current-player').textContent = 
+            `Current Player: ${this.currentPlayer}${this.isBotGame && this.currentPlayer === 'white' ? ' (Bot)' : ''}`;
     }
 
     handleSquareClick(row, col) {
         if (this.gameOver) return;
+        if (this.isBotGame && this.currentPlayer === 'white') return;
 
         const piece = this.board[row][col];
 
         // If a piece is selected and we click on a valid move
         if (this.selectedPiece && this.validMoves.some(move => move.row === row && move.col === col)) {
             this.movePiece(this.selectedPiece.row, this.selectedPiece.col, row, col);
+            if (this.isBotGame && !this.gameOver) {
+                setTimeout(() => this.makeBotMove(), 500);
+            }
             return;
         }
 
@@ -111,6 +165,40 @@ class CheckersGame {
         this.renderBoard();
     }
 
+    makeBotMove() {
+        if (this.gameOver || this.currentPlayer !== 'white') return;
+
+        // Find all possible moves for white pieces
+        const allMoves = [];
+        for (let row = 0; row < 8; row++) {
+            for (let col = 0; col < 8; col++) {
+                const piece = this.board[row][col];
+                if (piece && piece.color === 'white') {
+                    const moves = this.getValidMoves(row, col);
+                    moves.forEach(move => {
+                        allMoves.push({
+                            from: { row, col },
+                            to: { row: move.row, col: move.col },
+                            isJump: move.isJump
+                        });
+                    });
+                }
+            }
+        }
+
+        if (allMoves.length === 0) return;
+
+        // Prioritize jumps
+        const jumps = allMoves.filter(move => move.isJump);
+        const movesToConsider = jumps.length > 0 ? jumps : allMoves;
+
+        // Randomly select a move
+        const randomMove = movesToConsider[Math.floor(Math.random() * movesToConsider.length)];
+        
+        // Make the move
+        this.movePiece(randomMove.from.row, randomMove.from.col, randomMove.to.row, randomMove.to.col);
+    }
+
     getValidMoves(row, col) {
         const piece = this.board[row][col];
         if (!piece) return [];
@@ -118,7 +206,7 @@ class CheckersGame {
         const moves = [];
         const directions = piece.isKing ? 
             [[-1, -1], [-1, 1], [1, -1], [1, 1]] :
-            piece.color === 'red' ? [[1, -1], [1, 1]] : [[-1, -1], [-1, 1]];
+            piece.color === 'white' ? [[1, -1], [1, 1]] : [[-1, -1], [-1, 1]];
 
         for (const [dr, dc] of directions) {
             const newRow = row + dr;
@@ -169,7 +257,7 @@ class CheckersGame {
         this.board[toRow][toCol] = piece;
 
         // Check if piece should be kinged
-        if ((piece.color === 'red' && toRow === 7) || (piece.color === 'black' && toRow === 0)) {
+        if ((piece.color === 'white' && toRow === 7) || (piece.color === 'black' && toRow === 0)) {
             piece.isKing = true;
         }
 
@@ -182,14 +270,14 @@ class CheckersGame {
         }
 
         // Switch players
-        this.currentPlayer = this.currentPlayer === 'red' ? 'black' : 'red';
+        this.currentPlayer = this.currentPlayer === 'white' ? 'black' : 'white';
         this.selectedPiece = null;
         this.validMoves = [];
 
         // Check for game over
         if (this.isGameOver()) {
             this.gameOver = true;
-            const winner = this.currentPlayer === 'red' ? 'Black' : 'Red';
+            const winner = this.currentPlayer === 'white' ? 'Black' : 'White';
             document.getElementById('game-status').textContent = `Game Over! ${winner} wins!`;
         }
 
@@ -197,20 +285,20 @@ class CheckersGame {
     }
 
     isGameOver() {
-        let redPieces = 0;
+        let whitePieces = 0;
         let blackPieces = 0;
 
         for (let row = 0; row < 8; row++) {
             for (let col = 0; col < 8; col++) {
                 const piece = this.board[row][col];
                 if (piece) {
-                    if (piece.color === 'red') redPieces++;
+                    if (piece.color === 'white') whitePieces++;
                     else blackPieces++;
                 }
             }
         }
 
-        return redPieces === 0 || blackPieces === 0;
+        return whitePieces === 0 || blackPieces === 0;
     }
 }
 
