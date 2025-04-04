@@ -111,28 +111,29 @@ class CheckersGame {
         this.gameId = Math.random().toString(36).substring(2, 15);
         this.playerColor = 'white'; // First player is always white
         
-        // Create a proper Telegram Mini App link
-        const botName = tg.initDataUnsafe.start_param || 'CheckersGameBot'; // fallback bot name
-        const gameLink = `https://t.me/${botName}?start=game_${this.gameId}`;
+        // Create a proper Telegram Mini App link with the correct bot username
+        const gameLink = `https://t.me/webxdragtestbot/app?startapp=${this.gameId}`;
         
         document.getElementById('share-link').value = gameLink;
         document.getElementById('game-link').classList.remove('hidden');
         
         // Show MainButton for sharing game state
-        tg.MainButton.setText("Share Game State");
-        tg.MainButton.show();
-
-        // Also create a share button using Telegram's native sharing
-        tg.BackButton.hide();
-        tg.MainButton.setText('Share Game');
+        tg.MainButton.setText("Share Game");
         tg.MainButton.show();
         tg.MainButton.onClick(() => {
-            tg.shareGameScore();
-            tg.sendData(JSON.stringify({
-                type: 'share_game',
-                gameId: this.gameId,
-                link: gameLink
-            }));
+            // Share the game link using Telegram's native sharing
+            tg.showPopup({
+                title: 'Share Game',
+                message: 'Share this game with your friend:',
+                buttons: [{
+                    type: 'default',
+                    text: 'Copy Link',
+                    onClick: () => {
+                        navigator.clipboard.writeText(gameLink);
+                        tg.showAlert('Link copied to clipboard!');
+                    }
+                }]
+            });
         });
     }
 
