@@ -2,6 +2,11 @@
 const tg = window.Telegram.WebApp;
 tg.expand();
 
+// Debug logging
+const debug = (message) => {
+    console.log(`[Checkers Debug] ${message}`);
+};
+
 class CheckersGame {
     constructor() {
         this.board = [];
@@ -14,12 +19,14 @@ class CheckersGame {
         this.gameId = null;
         this.playerColor = null;
         this.lastUpdateTime = 0;
+        this.lastSavedState = null;
         
         // Check if there's a game ID in the URL
         const urlParams = new URLSearchParams(window.location.search);
         const gameId = urlParams.get('game');
         
         if (gameId) {
+            debug(`Joining game with ID: ${gameId}`);
             this.joinGame(gameId);
         } else {
             this.setupEventListeners();
@@ -98,48 +105,62 @@ class CheckersGame {
     }
 
     setupCloudStorageListener() {
+        debug('Setting up cloud storage listener');
         // Poll for updates every 500ms
         setInterval(() => {
             if (this.gameId) {
-                tg.CloudStorage.getItem(`game_${this.gameId}_state`)
-                    .then(state => {
-                        if (state) {
-                            const gameState = JSON.parse(state);
-                            // Only update if the state is newer
-                            if (gameState.timestamp > this.lastUpdateTime) {
-                                this.updateGameState(gameState);
-                                this.lastUpdateTime = gameState.timestamp;
-                            }
-                        }
-                    })
-                    .catch(error => {
-                        console.error('Error fetching game state:', error);
-                    });
+                this.fetchGameState();
             }
         }, 500);
     }
 
-    updateGameState(gameState) {
-        if (!gameState || !gameState.board) return;
-        
-        // Only update if it's not our turn or if we're joining
-        if (this.currentPlayer !== this.playerColor || !this.board.length) {
-            this.board = gameState.board;
-            this.currentPlayer = gameState.currentPlayer;
-            this.gameOver = gameState.gameOver;
-            
-            this.renderBoard();
-            
-            if (this.gameOver) {
-                const winner = this.currentPlayer === 'white' ? 'Black' : 'White';
-                document.getElementById('game-status').textContent = `Game Over! ${winner} wins!`;
+    async fetchGameState() {
+        try {
+            const state = await tg.CloudStorage.getItem(`game_${this.gameId}_state`);
+            if (state) {
+                const gameState = JSON.parse(state);
+                debug(`Received game state: currentPlayer=${gameState.currentPlayer}, timestamp=${gameState.timestamp}`);
+                
+                // Only update if the state is newer and different from our last saved state
+                if (gameState.timestamp > this.lastUpdateTime && 
+                    JSON.stringify(gameState) !== JSON.stringify(this.lastSavedState)) {
+                    debug('Updating game state - newer state received');
+                    this.updateGameState(gameState);
+                    this.lastUpdateTime = gameState.timestamp;
+                    this.lastSavedState = gameState;
+                }
             }
+        } catch (error) {
+            console.error('Error fetching game state:', error);
+        }
+    }
 
-            // Update game status for waiting player
-            if (this.currentPlayer !== this.playerColor && !this.gameOver) {
-                document.getElementById('game-status').textContent = "Opponent's turn...";
-            } else if (this.currentPlayer === this.playerColor && !this.gameOver) {
+    updateGameState(gameState) {
+        if (!gameState || !gameState.board) {
+            debug('Invalid game state received');
+            return;
+        }
+        
+        debug(`Updating state: currentPlayer=${gameState.currentPlayer}, myColor=${this.playerColor}`);
+        
+        // Always update the board state
+        this.board = gameState.board;
+        this.currentPlayer = gameState.currentPlayer;
+        this.gameOver = gameState.gameOver;
+        
+        this.renderBoard();
+        
+        if (this.gameOver) {
+            const winner = this.currentPlayer === 'white' ? 'Black' : 'White';
+            document.getElementById('game-status').textContent = `Game Over! ${winner} wins!`;
+        } else {
+            // Update game status
+            if (this.currentPlayer === this.playerColor) {
                 document.getElementById('game-status').textContent = "Your turn!";
+                debug('Updated status: Your turn');
+            } else {
+                document.getElementById('game-status').textContent = "Opponent's turn...";
+                debug('Updated status: Opponent turn');
             }
         }
     }
@@ -177,7 +198,7 @@ class CheckersGame {
         this.saveGameState();
     }
 
-    saveGameState() {
+    async saveGameState() {
         if (!this.gameId) return;
 
         const gameState = {
@@ -187,14 +208,17 @@ class CheckersGame {
             timestamp: Date.now()
         };
 
-        tg.CloudStorage.setItem(`game_${this.gameId}_state`, JSON.stringify(gameState))
-            .then(() => {
-                this.lastUpdateTime = gameState.timestamp;
-            })
-            .catch(error => {
-                tg.showAlert('Failed to save game state. Please try again.');
-                console.error('Error saving game state:', error);
-            });
+        debug(`Saving game state: currentPlayer=${gameState.currentPlayer}, timestamp=${gameState.timestamp}`);
+
+        try {
+            await tg.CloudStorage.setItem(`game_${this.gameId}_state`, JSON.stringify(gameState));
+            this.lastUpdateTime = gameState.timestamp;
+            this.lastSavedState = gameState;
+            debug('Game state saved successfully');
+        } catch (error) {
+            console.error('Error saving game state:', error);
+            tg.showAlert('Failed to save game state. Please try again.');
+        }
     }
 
     initializeBoard() {
@@ -367,6 +391,8 @@ class CheckersGame {
     }
 
     movePiece(fromRow, fromCol, toRow, toCol) {
+        debug(`Moving piece from (${fromRow},${fromCol}) to (${toRow},${toCol})`);
+        
         const piece = this.board[fromRow][fromCol];
         this.board[fromRow][fromCol] = null;
         this.board[toRow][toCol] = piece;
@@ -374,6 +400,7 @@ class CheckersGame {
         // Check if piece should be kinged
         if ((piece.color === 'white' && toRow === 7) || (piece.color === 'black' && toRow === 0)) {
             piece.isKing = true;
+            debug('Piece promoted to king');
         }
 
         // Check for jumps
@@ -382,6 +409,7 @@ class CheckersGame {
             const jumpedRow = (fromRow + toRow) / 2;
             const jumpedCol = (fromCol + toCol) / 2;
             this.board[jumpedRow][jumpedCol] = null;
+            debug('Jump move executed');
         }
 
         // Switch players
@@ -389,11 +417,14 @@ class CheckersGame {
         this.selectedPiece = null;
         this.validMoves = [];
 
+        debug(`Switched current player to: ${this.currentPlayer}`);
+
         // Check for game over
         if (this.isGameOver()) {
             this.gameOver = true;
             const winner = this.currentPlayer === 'white' ? 'Black' : 'White';
             document.getElementById('game-status').textContent = `Game Over! ${winner} wins!`;
+            debug(`Game Over - ${winner} wins`);
         } else {
             // Update status messages
             if (this.isMultiplayer) {
@@ -409,6 +440,7 @@ class CheckersGame {
 
         // Save state immediately after move in multiplayer
         if (this.isMultiplayer) {
+            debug('Saving state after multiplayer move');
             this.saveGameState();
         }
     }
