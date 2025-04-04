@@ -96,44 +96,43 @@ class CheckersGame {
         this.isMultiplayer = true;
         this.playerColor = 'black'; // Second player is always black
         this.setupEventListeners();
-        this.startNewGame();
         
+        // Hide game mode selection and show the board
         document.getElementById('game-mode').classList.add('hidden');
         document.getElementById('board').classList.remove('hidden');
         document.getElementById('restart-btn').classList.remove('hidden');
         
-        // Show MainButton for receiving game state
-        tg.MainButton.setText("Request Game State");
-        tg.MainButton.show();
+        // Start a new game
+        this.startNewGame();
+        
+        // Show status
+        document.getElementById('game-status').textContent = "Waiting for opponent's move...";
     }
 
     generateGameLink() {
         this.gameId = Math.random().toString(36).substring(2, 15);
         this.playerColor = 'white'; // First player is always white
         
-        // Create a proper Telegram Mini App link with the correct bot username
-        const gameLink = `https://t.me/webxdragtestbot/app?startapp=${this.gameId}`;
+        // Create a proper Telegram Mini App link
+        // Format: tg://resolve?domain=webxdragtestbot&appname=checkers&startapp=gameId
+        const gameLink = `tg://resolve?domain=webxdragtestbot&appname=checkers&startapp=${this.gameId}`;
+        const webLink = `https://t.me/webxdragtestbot/checkers?startapp=${this.gameId}`;
         
-        document.getElementById('share-link').value = gameLink;
+        document.getElementById('share-link').value = webLink;
         document.getElementById('game-link').classList.remove('hidden');
         
         // Show MainButton for sharing game state
         tg.MainButton.setText("Share Game");
         tg.MainButton.show();
         tg.MainButton.onClick(() => {
-            // Share the game link using Telegram's native sharing
-            tg.showPopup({
-                title: 'Share Game',
-                message: 'Share this game with your friend:',
-                buttons: [{
-                    type: 'default',
-                    text: 'Copy Link',
-                    onClick: () => {
-                        navigator.clipboard.writeText(gameLink);
-                        tg.showAlert('Link copied to clipboard!');
-                    }
-                }]
-            });
+            // Use Telegram's native sharing
+            tg.openTelegramLink(gameLink);
+        });
+
+        // Also enable the copy link button
+        document.getElementById('copy-link').addEventListener('click', () => {
+            navigator.clipboard.writeText(webLink);
+            tg.showAlert('Game link copied! Share it with your friend.');
         });
     }
 
